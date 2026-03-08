@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """the game trains itself while you watch. every tick is inference AND a training step."""
 import sys, os, time, signal
+os.environ["NVCC_PREPEND_FLAGS"] = "-w"  # suppress nvcc warnings
 from tinygrad import Tensor, dtypes
 from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters
@@ -29,6 +30,10 @@ def main():
   frame_buf = []
   tick = 0
   fps_t = time.monotonic()
+
+  # redirect stderr to /dev/null — nvcc spams warnings that destroy the TUI
+  _stderr = os.dup(2)
+  os.dup2(os.open(os.devnull, os.O_WRONLY), 2)
 
   init_screen()
   signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
@@ -86,6 +91,7 @@ def main():
 
   except (KeyboardInterrupt, SystemExit): pass
   finally:
+    os.dup2(_stderr, 2)  # restore stderr
     cleanup_screen()
     print(f"dissolved after {tick} ticks. the tensors rest.")
 
