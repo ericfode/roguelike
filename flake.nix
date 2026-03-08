@@ -7,16 +7,16 @@
   outputs = { self, nixpkgs, flake-utils }: flake-utils.lib.eachDefaultSystem (system:
     let
       pkgs = nixpkgs.legacyPackages.${system};
-      python = pkgs.python313;
+      python = pkgs.python313.withPackages (ps: with ps; [ numpy tinygrad ]);
     in {
+      packages.default = pkgs.writeShellScriptBin "roguelike" ''
+        CPU=1 exec ${python}/bin/python ${self}/roguelike.py "$@"
+      '';
+      apps.default = { type = "app"; program = "${self.packages.${system}.default}/bin/roguelike"; };
       devShells.default = pkgs.mkShell {
-        packages = [
-          (python.withPackages (ps: with ps; [ numpy tinygrad ]))
-        ];
+        packages = [ python ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
-        shellHook = ''
-          echo "tensor roguelike dev shell — the game is inference"
-        '';
+        shellHook = ''echo "tensor roguelike — run with: CPU=1 python roguelike.py"'';
       };
     }
   );
