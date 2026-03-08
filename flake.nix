@@ -10,9 +10,13 @@
       python = pkgs.python313.withPackages (ps: with ps; [ numpy tinygrad ]);
     in {
       packages.default = pkgs.writeShellScriptBin "roguelike" ''
+        exec ${python}/bin/python ${self}/main.py "$@"
+      '';
+      packages.classic = pkgs.writeShellScriptBin "roguelike-classic" ''
         CPU=1 exec ${python}/bin/python ${self}/roguelike.py "$@"
       '';
       apps.default = { type = "app"; program = "${self.packages.${system}.default}/bin/roguelike"; };
+      apps.classic = { type = "app"; program = "${self.packages.${system}.classic}/bin/roguelike-classic"; };
       devShells.default = pkgs.mkShell {
         packages = [ python ];
         LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
