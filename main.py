@@ -71,6 +71,9 @@ def main():
         loss_val, s, c, p = interestingness(buf)
         opt.zero_grad()
         loss_val.backward()
+        # gradient clipping — prevents training explosions
+        for p in all_params:
+          if p.grad is not None: p.grad = p.grad.clip(-1.0, 1.0)
         opt.step()
         metrics.update({'surprise': float(s.numpy()), 'coherence': float(c.numpy()), 'persistence': float(p.numpy()), 'loss': float(loss_val.numpy())})
 
