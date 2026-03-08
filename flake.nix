@@ -9,10 +9,13 @@
       pkgs = import nixpkgs { inherit system; config.allowUnfree = true; };
       python = pkgs.python313.withPackages (ps: with ps; [ numpy tinygrad ]);
       cuda = pkgs.cudaPackages;
-      cudart-lib = cuda.cuda_cudart.override { };
+      nvcc = cuda.cuda_nvcc;
+      cudart = cuda.cuda_cudart;
     in {
       packages.default = pkgs.writeShellScriptBin "roguelike" ''
-        export LD_LIBRARY_PATH="/usr/lib/wsl/lib:''${LD_LIBRARY_PATH:-}"
+        export PATH="${nvcc}/bin:$PATH"
+        export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]}:''${LD_LIBRARY_PATH:-}"
+        export CPATH="${cudart}/include:''${CPATH:-}"
         exec ${python}/bin/python ${self}/main.py "$@"
       '';
       packages.classic = pkgs.writeShellScriptBin "roguelike-classic" ''
@@ -21,13 +24,8 @@
       apps.default = { type = "app"; program = "${self.packages.${system}.default}/bin/roguelike"; };
       apps.classic = { type = "app"; program = "${self.packages.${system}.classic}/bin/roguelike-classic"; };
       devShells.default = pkgs.mkShell {
-        packages = [
-          python
-          cuda.cuda_nvcc
-          cuda.cuda_cudart
-        ];
-        LD_LIBRARY_PATH = "/usr/lib/wsl/lib:"
-          + pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
+        packages = [ python nvcc cudart ];
+        LD_LIBRARY_PATH = "/usr/lib/wsl/lib:" + pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ];
         shellHook = ''echo "tensor roguelike — GPU: $(python -c 'from tinygrad import Device; print(Device.DEFAULT)' 2>/dev/null || echo 'detecting...')"'';
       };
     }
