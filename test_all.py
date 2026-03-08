@@ -72,7 +72,9 @@ def test_integration():
   activations = Tensor.zeros(1, HIDDEN, H, W)
   frame_buf = []
 
+  lv = 0.0
   for tick in range(20):
+    activations = activations.detach()  # break inter-tick graph chain
     action, _ = player(activations)
     logits, acts_raw = world(frame, action)
     activations = acts_raw.unsqueeze(0)
@@ -82,16 +84,20 @@ def test_integration():
     tile_vals = Tensor.arange(N_TILES).float() / N_TILES
     next_soft = (soft * tile_vals.reshape(1, 1, N_TILES)).sum(axis=-1)
     frame_buf.append(next_soft)
-    if len(frame_buf) > 16: frame_buf = frame_buf[-16:]
+    if len(frame_buf) > 8: frame_buf = frame_buf[-8:]
     frame = logits.argmax(axis=-1).detach()
 
     if len(frame_buf) >= 4:
-      loss, s, c, p = interestingness(frame_buf[-8:] if len(frame_buf) >= 8 else frame_buf)
+      all_params = get_parameters(world) + get_parameters(player)
+      loss, s, c, p = interestingness(frame_buf, tick=tick)
       opt.zero_grad()
       loss.backward()
+      for pr in all_params:
+        if pr.grad is not None: pr.grad = pr.grad.clip(-1.0, 1.0)
       opt.step()
       lv = float(loss.numpy())
       assert np.isfinite(lv), f"loss not finite at tick {tick}: {lv}"
+      frame_buf = [f.detach() for f in frame_buf[:-2]] + frame_buf[-2:]
 
     frame_np = np.nan_to_num(frame.numpy(), nan=0)
     assert not np.any(np.isnan(frame_np)), f"NaN frame at tick {tick}"

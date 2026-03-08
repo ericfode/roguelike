@@ -2,6 +2,7 @@
 """the game trains itself while you watch. every tick is inference AND a training step."""
 import sys, os, time, signal, json
 os.environ["NVCC_PREPEND_FLAGS"] = "-w"  # suppress nvcc warnings
+import numpy as np
 from tinygrad import Tensor, dtypes
 from tinygrad.nn.optim import Adam
 from tinygrad.nn.state import get_parameters
@@ -10,7 +11,8 @@ from player import PlayerNet
 from loss import interestingness
 from tui import render, init_screen, cleanup_screen
 
-FRAME_BUF = 16
+FRAME_BUF = 8
+TRAIN_EVERY = 1  # train every N ticks
 LR = 3e-4
 FPS_TARGET = 10
 
@@ -44,6 +46,11 @@ def main():
     while True:
       loop_start = time.monotonic()
 
+      # CRITICAL: detach activations between ticks — breaks graph accumulation.
+      # without this, each tick's graph chains through ALL previous ticks via
+      # the activation tensor, causing O(tick^2) backward cost.
+      activations = activations.detach()
+
       # player observes world's latent state, produces action
       action, attn = player(activations)
       last_action = action
@@ -56,7 +63,6 @@ def main():
       tau = max(0.5, 2.0 - tick * 0.001)
       gumbel = -(-Tensor.rand(*logits.shape).clip(1e-8, 1).log()).log()
       soft = ((logits + gumbel) / tau).softmax(axis=-1)  # [H, W, N_TILES]
-      # weighted sum over tile types -> continuous frame value
       tile_vals = Tensor.arange(N_TILES).float() / N_TILES
       next_frame_soft = (soft * tile_vals.reshape(1, 1, N_TILES)).sum(axis=-1)  # [H, W]
 
@@ -68,21 +74,21 @@ def main():
 
       # compute loss and train
       metrics = {'tick': tick, 'surprise': 0.0, 'coherence': 0.0, 'persistence': 0.0, 'loss': 0.0, 'lr': LR, 'params': n_params / 1000, 'fps': 0.0, 'tau': tau}
-      if len(frame_buf) >= 4:
-        buf = frame_buf[-8:] if len(frame_buf) >= 8 else frame_buf
-        loss_val, s, c, pers = interestingness(buf, tick=tick)
+      if len(frame_buf) >= 4 and tick % TRAIN_EVERY == 0:
+        loss_val, s, c, pers = interestingness(frame_buf, tick=tick)
         opt.zero_grad()
         loss_val.backward()
         for p in all_params:
           if p.grad is not None: p.grad = p.grad.clip(-1.0, 1.0)
         opt.step()
         metrics.update({'surprise': float(s.numpy()), 'coherence': float(c.numpy()), 'persistence': float(pers.numpy()), 'loss': float(loss_val.numpy())})
+        # detach old frames — only keep live graph for most recent entries
+        frame_buf = [f.detach() for f in frame_buf[:-2]] + frame_buf[-2:]
 
       # render
       now = time.monotonic()
       metrics['fps'] = 1.0 / max(0.001, now - fps_t)
       fps_t = now
-      import numpy as np
       frame_np = np.nan_to_num(frame.numpy(), nan=0).clip(0, N_TILES-1).astype(int)
       acts_raw = np.nan_to_num(activations_raw.mean(axis=0).numpy(), nan=0)
       acts_np = (acts_raw - acts_raw.min()) / (acts_raw.max() - acts_raw.min() + 1e-8)
