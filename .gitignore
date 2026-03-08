@@ -11,3 +11,4 @@ result
 .logs/
 __pycache__/
 .beads/
+metrics.jsonl

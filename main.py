@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """the game trains itself while you watch. every tick is inference AND a training step."""
-import sys, os, time, signal
+import sys, os, time, signal, json
 os.environ["NVCC_PREPEND_FLAGS"] = "-w"  # suppress nvcc warnings
 from tinygrad import Tensor, dtypes
 from tinygrad.nn.optim import Adam
@@ -30,6 +30,8 @@ def main():
   frame_buf = []
   tick = 0
   fps_t = time.monotonic()
+  log_path = os.environ.get("METRICS_LOG", "metrics.jsonl")
+  log_f = open(log_path, "a") if log_path else None
 
   # redirect stderr to /dev/null — nvcc spams warnings that destroy the TUI
   _stderr = os.dup(2)
@@ -68,14 +70,13 @@ def main():
       metrics = {'tick': tick, 'surprise': 0.0, 'coherence': 0.0, 'persistence': 0.0, 'loss': 0.0, 'lr': LR, 'params': n_params / 1000, 'fps': 0.0, 'tau': tau}
       if len(frame_buf) >= 4:
         buf = frame_buf[-8:] if len(frame_buf) >= 8 else frame_buf
-        loss_val, s, c, p = interestingness(buf)
+        loss_val, s, c, pers = interestingness(buf)
         opt.zero_grad()
         loss_val.backward()
-        # gradient clipping — prevents training explosions
         for p in all_params:
           if p.grad is not None: p.grad = p.grad.clip(-1.0, 1.0)
         opt.step()
-        metrics.update({'surprise': float(s.numpy()), 'coherence': float(c.numpy()), 'persistence': float(p.numpy()), 'loss': float(loss_val.numpy())})
+        metrics.update({'surprise': float(s.numpy()), 'coherence': float(c.numpy()), 'persistence': float(pers.numpy()), 'loss': float(loss_val.numpy())})
 
       # render
       now = time.monotonic()
@@ -87,6 +88,7 @@ def main():
       acts_np = (acts_raw - acts_raw.min()) / (acts_raw.max() - acts_raw.min() + 1e-8)
       action_np = last_action.detach().numpy().flatten()
       render(frame_np, acts_np, action_np, metrics)
+      if log_f and tick % 10 == 0: log_f.write(json.dumps(metrics) + '\n'); log_f.flush()
       tick += 1
 
       # fps limiter
@@ -96,6 +98,7 @@ def main():
   except (KeyboardInterrupt, SystemExit): pass
   finally:
     os.dup2(_stderr, 2)  # restore stderr
+    if log_f: log_f.close()
     cleanup_screen()
     print(f"dissolved after {tick} ticks. the tensors rest.")
 
