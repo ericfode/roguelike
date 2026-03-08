@@ -43,14 +43,21 @@ def _entropy(frames):
   p = stacked.softmax()
   return -(p * (p + 1e-8).log()).sum() / len(frames)
 
-# weights: surprise matters most (drives change), coherence keeps structure,
-# persistence prevents chaos, diversity prevents single-tile worlds
+# base weights
 W_S, W_C, W_P, W_D, W_E = 2.0, 1.0, 1.0, 0.5, 0.01
+# curriculum: ticks at which each objective reaches full weight
+WARMUP_COHERENCE, WARMUP_SURPRISE, WARMUP_PERSIST = 0, 100, 200
 
-def interestingness(frames):
-  """combined loss. MINIMIZE this = MAXIMIZE interestingness. returns (loss, s, c, p)"""
+def _ramp(tick, start): return min(1.0, max(0.0, (tick - start) / 100.0)) if tick is not None else 1.0
+
+def interestingness(frames, tick=None):
+  """combined loss. MINIMIZE this = MAXIMIZE interestingness. returns (loss, s, c, p)
+  tick: optional, enables curriculum warmup — coherence first, then surprise, then persistence"""
   assert len(frames) >= 2
   s, c, p = surprise(frames), coherence(frames[-1]), persistence(frames)
   d = diversity(frames)
-  loss = -(W_S * s + W_C * c + W_P * p.relu() + W_D * d) - W_E * _entropy(frames)
+  ws = W_S * _ramp(tick, WARMUP_SURPRISE)
+  wc = W_C * _ramp(tick, WARMUP_COHERENCE)
+  wp = W_P * _ramp(tick, WARMUP_PERSIST)
+  loss = -(ws * s + wc * c + wp * p.relu() + W_D * d) - W_E * _entropy(frames)
   return loss, s, c, p

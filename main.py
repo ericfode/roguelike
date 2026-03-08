@@ -70,7 +70,7 @@ def main():
       metrics = {'tick': tick, 'surprise': 0.0, 'coherence': 0.0, 'persistence': 0.0, 'loss': 0.0, 'lr': LR, 'params': n_params / 1000, 'fps': 0.0, 'tau': tau}
       if len(frame_buf) >= 4:
         buf = frame_buf[-8:] if len(frame_buf) >= 8 else frame_buf
-        loss_val, s, c, pers = interestingness(buf)
+        loss_val, s, c, pers = interestingness(buf, tick=tick)
         opt.zero_grad()
         loss_val.backward()
         for p in all_params:
