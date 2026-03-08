@@ -78,9 +78,10 @@ def main():
       now = time.monotonic()
       metrics['fps'] = 1.0 / max(0.001, now - fps_t)
       fps_t = now
-      frame_np = frame.numpy().astype(int)
-      acts_raw = activations_raw.mean(axis=0).numpy()  # [H, W]
-      acts_np = (acts_raw - acts_raw.min()) / (acts_raw.max() - acts_raw.min() + 1e-8)  # normalize to [0,1]
+      import numpy as np
+      frame_np = np.nan_to_num(frame.numpy(), nan=0).clip(0, N_TILES-1).astype(int)
+      acts_raw = np.nan_to_num(activations_raw.mean(axis=0).numpy(), nan=0)
+      acts_np = (acts_raw - acts_raw.min()) / (acts_raw.max() - acts_raw.min() + 1e-8)
       action_np = last_action.detach().numpy().flatten()
       render(frame_np, acts_np, action_np, metrics)
       tick += 1
