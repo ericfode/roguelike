@@ -9,15 +9,16 @@ def test_world():
   from world import WorldNet, W, H, N_TILES, HIDDEN, ACTION_DIM
   net = WorldNet()
   frame = Tensor.randint(H, W, high=N_TILES)
+  frame_oh = Tensor.one_hot(frame, N_TILES).float()
   action = Tensor.randn(ACTION_DIM)
-  logits, acts = net(frame, action)
+  logits, acts = net(frame_oh, action)
   assert logits.shape == (H, W, N_TILES), f"logits {logits.shape}"
   assert acts.shape == (HIDDEN, H, W), f"acts {acts.shape}"
-  # 50 ticks, no NaN, activations bounded
   max_act = 0
   for i in range(50):
     frame = logits.argmax(axis=-1).detach()
-    logits, acts = net(frame, action)
+    frame_oh = Tensor.one_hot(frame, N_TILES).float()
+    logits, acts = net(frame_oh, action)
     vals = acts.numpy()
     assert not np.any(np.isnan(vals)), f"NaN at tick {i}"
     max_act = max(max_act, float(np.abs(vals).max()))
@@ -42,11 +43,9 @@ def test_loss():
   assert loss.shape == (), f"loss shape {loss.shape}"
   lv = float(loss.numpy())
   assert np.isfinite(lv), f"loss not finite: {lv}"
-  # verify loss decreases with gradients
   print(f"  loss: val={lv:.4f} s={float(s.numpy()):.3f} c={float(c.numpy()):.3f} p={float(p.numpy()):.3f} ✓")
 
 def test_tui():
-  """test render with mock data — no screen needed, just verify no crash on import"""
   from tui import downsample, bar, heatmap_char
   arr = np.random.rand(48, 160)
   ds = downsample(arr, 12, 32)
@@ -58,7 +57,7 @@ def test_tui():
   print(f"  tui: downsample={ds.shape} bar='{b}' ✓")
 
 def test_integration():
-  """full loop: 20 ticks, no NaN, loss finite"""
+  """full loop: 20 ticks with JIT, detach, grad clip — mirrors main.py"""
   from world import WorldNet, W, H, N_TILES, HIDDEN, ACTION_DIM
   from player import PlayerNet
   from loss import interestingness
@@ -67,16 +66,20 @@ def test_integration():
 
   Tensor.training = True
   world, player = WorldNet(), PlayerNet()
-  opt = Adam(get_parameters(world) + get_parameters(player), lr=3e-4)
+  all_params = get_parameters(world) + get_parameters(player)
+  opt = Adam(all_params, lr=3e-4)
   frame = Tensor.randint(H, W, high=N_TILES)
   activations = Tensor.zeros(1, HIDDEN, H, W)
   frame_buf = []
-
   lv = 0.0
+  times = []
+
   for tick in range(20):
-    activations = activations.detach()  # break inter-tick graph chain
+    t0 = time.monotonic()
+    activations = activations.detach()
+    frame_oh = Tensor.one_hot(frame, N_TILES).float()
     action, _ = player(activations)
-    logits, acts_raw = world(frame, action)
+    logits, acts_raw = world(frame_oh, action)
     activations = acts_raw.unsqueeze(0)
     tau = max(0.5, 2.0 - tick * 0.001)
     gumbel = -(-Tensor.rand(*logits.shape).clip(1e-8, 1).log()).log()
@@ -88,21 +91,25 @@ def test_integration():
     frame = logits.argmax(axis=-1).detach()
 
     if len(frame_buf) >= 4:
-      all_params = get_parameters(world) + get_parameters(player)
       loss, s, c, p = interestingness(frame_buf, tick=tick)
       opt.zero_grad()
       loss.backward()
       for pr in all_params:
         if pr.grad is not None: pr.grad = pr.grad.clip(-1.0, 1.0)
       opt.step()
+      for pr in all_params: pr.realize()
       lv = float(loss.numpy())
       assert np.isfinite(lv), f"loss not finite at tick {tick}: {lv}"
       frame_buf = [f.detach() for f in frame_buf[:-2]] + frame_buf[-2:]
 
-    frame_np = np.nan_to_num(frame.numpy(), nan=0)
-    assert not np.any(np.isnan(frame_np)), f"NaN frame at tick {tick}"
+    assert not np.any(np.isnan(frame.numpy())), f"NaN frame at tick {tick}"
+    times.append(time.monotonic() - t0)
 
-  print(f"  integration: 20 ticks, loss={lv:.4f} ✓")
+  # verify no slowdown: last 5 ticks should not be >3x slower than first 5
+  early, late = np.mean(times[5:10]), np.mean(times[15:20])
+  ratio = late / (early + 1e-6)
+  print(f"  integration: 20 ticks, loss={lv:.4f}, early={early:.1f}s late={late:.1f}s ratio={ratio:.2f}x ✓")
+  assert ratio < 3.0, f"slowdown detected: {ratio:.1f}x"
 
 if __name__ == '__main__':
   tests = [('world', test_world), ('player', test_player), ('loss', test_loss), ('tui', test_tui), ('integration', test_integration)]

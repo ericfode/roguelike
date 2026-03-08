@@ -16,6 +16,14 @@
         export PATH="${nvcc}/bin:$PATH"
         export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]}:''${LD_LIBRARY_PATH:-}"
         export CPATH="${cudart}/include:''${CPATH:-}"
+        export BEAM="''${BEAM:-2}"
+        exec ${python}/bin/python ${self}/main.py "$@"
+      '';
+      packages.fast = pkgs.writeShellScriptBin "roguelike-fast" ''
+        export PATH="${nvcc}/bin:$PATH"
+        export LD_LIBRARY_PATH="/usr/lib/wsl/lib:${pkgs.lib.makeLibraryPath [ pkgs.stdenv.cc.cc.lib ]}:''${LD_LIBRARY_PATH:-}"
+        export CPATH="${cudart}/include:''${CPATH:-}"
+        export BEAM=4
         exec ${python}/bin/python ${self}/main.py "$@"
       '';
       packages.classic = pkgs.writeShellScriptBin "roguelike-classic" ''
