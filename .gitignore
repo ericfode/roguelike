@@ -1,7 +1,9 @@
-/target
 formal/.lake
 formal/lake-packages
 formal/build
+.venv/
+.direnv/
+result
 
 # Gas Town (added by gt)
 .runtime/
